@@ -1,0 +1,9 @@
+# Ignore batch files
+*.bat
+
+# Ignore PyInstaller spec files
+*.spec
+
+# Ignore build and dist folders
+build/
+dist/
