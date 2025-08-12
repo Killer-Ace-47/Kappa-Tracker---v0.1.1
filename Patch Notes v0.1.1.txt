@@ -1,21 +1,17 @@
-Patch Notes v0.1.1:
+Patch Notes v0.2.1:
 
-- Fixed an issue where progress data could be unexpectedly overwritten
+Massive Quest System Overhaul
 
-- Fixed a bug causing progress percentages not to update correctly
+- Added level requirements for quests, ensuring they unlock in the correct order.
 
-- Fixed a bug where the app wouldn’t return to your last used tracker screen on startup
+- Implemented previous quest requirements, so quests now respect in-game progression.
 
-- Fixed an issue where the game mode screen was skipped under specific conditions
+- Multi-choice quest handling: for quests with mutually exclusive options (e.g., The Huntsman Path – Sadist / Colleagues – Part 3), selecting one will automatically clear the others.
 
-- Added internal script improvements for better error handling during save/load operations
+Planned Features (coming soon)
 
-- Added confirmation prompt before opening external web browser links
+- Auto-completion of all prerequisite quests when completing one on the “All Quests” page.
 
-- Added Donate button — donations help fund digital licensing and ongoing development
-
-- Added placeholder Lightkeeper button on the tracker screen (feature coming soon)
-
-- Made footer text (version and copyright) less intrusive by darkening the color
+- Hideout and quest items tracking checklist.
 
 Join discord to stay up to date!
