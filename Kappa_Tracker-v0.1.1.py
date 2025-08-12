@@ -15,7 +15,7 @@ from tkinter.messagebox import showinfo
 
 app_ready = False  # Flag to block autosave until app is fully initialized
 
-APP_VERSION = "v0.1.1"
+APP_VERSION = "v0.2.1"
 KILLER_DEV_LINK = "https://discord.gg/8r5V3cmSWU"
 
 def resource_path(relative_path):
@@ -238,7 +238,7 @@ def reset_data():
 
 def update_progress_labels():
     try:
-        # Kappa progress calculation (unchanged)
+        # --- Kappa Progress ---
         if checklist_vars:
             total = len(checklist_vars)
             done = sum(var.get() for var in checklist_vars.values())
@@ -247,14 +247,25 @@ def update_progress_labels():
         else:
             kappa_progress_label.configure(text="Progress: 0%")
 
-        # Quest progress calculation (use UI vars, not saved data)
-        if quest_checklist_vars:
-            total = len(quest_checklist_vars)
-            done = sum(var.get() for var in quest_checklist_vars.values())
-            percent = int(done / total * 100) if total > 0 else 0
-            quest_progress_label.configure(text=f"Progress: {percent}%")
-        else:
+        # --- Quest Progress ---
+        current_mode = selected_game_mode.get()
+        if not current_mode:
             quest_progress_label.configure(text="Progress: 0%")
+            return
+
+        saved_state = data.get("quest_checklist", {}).get(current_mode, {})
+
+        total_quests = 0
+        completed_quests = 0
+
+        for quests in trader_quests.values():
+            for quest in quests:
+                total_quests += 1
+                if saved_state.get(quest["name"], False):
+                    completed_quests += 1
+
+        percent = int(completed_quests / total_quests * 100) if total_quests > 0 else 0
+        quest_progress_label.configure(text=f"Progress: {percent}%")
 
     except NameError:
         pass
@@ -351,6 +362,55 @@ def update_data_level_from_vars():
     if "level" not in data:
         data["level"] = {"PVE": 1, "PVP": 1}
     data["level"][current_mode] = level_value.get()
+    
+def on_quest_toggle(quest_name, trader):
+    global data
+
+    mode = data.get("game_mode", "PVE")
+    key = f"{trader}:{quest_name}"
+    completed = data.setdefault("quests_completed", {}).setdefault(mode, [])
+
+    if key in completed:
+        completed.remove(key)
+    else:
+        completed.append(key)
+
+    save_data()
+    update_progress_labels()
+
+    # Only refresh the quest list frame to reduce flicker
+    refresh_quest_list(trader)
+
+def is_quest_unlocked(quest, completed_quests, player_level, all_quests=None):
+    # Check player level requirement
+    if player_level < quest.get("level", 1):
+        return False
+
+    # Check exclusive quests (can't unlock if any exclusive quest completed)
+    if any(excl in completed_quests for excl in quest.get("exclusive_with", [])):
+        return False
+
+    # Special case: requires all other quests completed
+    if quest.get("requires_all_other_quests"):
+        if all_quests is None:
+            raise ValueError("all_quests must be provided for 'requires_all_other_quests' check")
+        other_quests = set()
+        for trader_quests in all_quests.values():
+            for q in trader_quests:
+                if q["name"] != quest["name"]:
+                    other_quests.add(q["name"])
+        if not other_quests.issubset(completed_quests):
+            return False
+
+    # Check requires: all quests that must be completed
+    if not all(req in completed_quests for req in quest.get("requires", [])):
+        return False
+
+    # Check requires_any: at least one of these quests must be completed
+    if "requires_any" in quest and not any(req in completed_quests for req in quest["requires_any"]):
+        return False
+
+    return True
 
 def update_data_quest_checklist_from_vars():
     current_mode = selected_game_mode.get()
@@ -987,286 +1047,288 @@ def open_info_link(url):
         title="Open Wiki Page",
         message="This will open the Escape from Tarkov Wiki page in your browser.\nDo you want to continue?"
     )
+
 # === QUEST CHECKLIST SCREEN ===
 
 trader_quests = {
     "Prapor": [
-        "Shooting Cans",
-        "Debut",
-        "Luxurious Life",
-        "Search Mission",
-        "Background Check",
-        "Shootout Picnic",
-        "Delivery From the Past",
-        "BP Depot",
-        "Bad Rep Evidence",
-        "Ice Cream Cones",
-        "Postman Pat - Part 1",
-        "Shaking Up the Teller",
-        "The Punisher - Part 1",
-        "The Punisher - Part 2",
-        "The Punisher - Part 3",
-        "The Punisher - Part 4",
-        "The Punisher - Part 5",
-        "The Punisher - Part 6",
-        "Polikhim Hobo",
-        "Big Customer",
-        "Grenadier",
-        "Perfect Mediator",
-        "Test Drive - Part 1",
-        "Test Drive - Part 2",
-        "Test Drive - Part 3",
-        "Test Drive - Part 4",
-        "Test Drive - Part 5",
-        "Test Drive - Part 6",
-        "Regulated Materials",
-        "The Bunker - Part 1",
-        "The Bunker - Part 2",
-        "Anesthesia",
-        "Documents",
-        "No Place for Renegades",
-        "Intimidator",
-        "Easy Job - Part 1",
-        "Easy Job - Part 2",
-        "Reconnaissance",
-        "Possessor",
-        "Belka and Strelka"
+        {"name": "Shooting Cans", "level": 1},
+        {"name": "Debut", "level": 1, "requires": ["Shooting Cans"]},
+        {"name": "Luxurious Life", "level": 1, "requires": ["Debut"]},
+        {"name": "Search Mission", "level": 2, "requires": ["Debut"]},
+        {"name": "Background Check", "level": 2, "requires": ["Luxurious Life"]},
+        {"name": "Shootout Picnic", "level": 3, "requires": ["Background Check"]},
+        {"name": "Delivery From the Past", "level": 5, "requires": ["Background Check"]},
+        {"name": "BP Depot", "level": 5, "requires": ["Delivery From the Past"]},
+        {"name": "Belka and Strelka", "level": 5, "requires": ["BP Depot"]},        
+        {"name": "Bad Rep Evidence", "level": 6, "requires": ["BP Depot"]},
+        {"name": "The Bunker - Part 1", "level": 10, "requires": ["BP Depot"]},
+        {"name": "The Bunker - Part 2", "level": 15, "requires": ["The Bunker - Part 1"]},
+        {"name": "No Place for Renegades", "level": 17, "requires": ["The Bunker - Part 2"]},
+        {"name": "Documents", "level": 19, "requires": ["No Place for Renegades"]},
+        {"name": "Ice Cream Cones", "level": 9, "requires": ["Bad Rep Evidence"]},
+        {"name": "Postman Pat - Part 1", "level": 10, "requires": ["Ice Cream Cones"]},
+        {"name": "Shaking Up the Teller", "level": 8, "requires": ["Ice Cream Cones"]},
+        {"name": "Possessor", "level": 10, "requires": ["Postman Pat - Part 1"]},
+        {"name": "The Punisher - Part 1", "level": 17, "requires": ["Shaking Up the Teller"]},
+        {"name": "The Punisher - Part 2", "level": 18, "requires": ["The Punisher - Part 1"]},
+        {"name": "The Punisher - Part 3", "level": 19, "requires": ["The Punisher - Part 2"]},
+        {"name": "The Punisher - Part 4", "level": 20, "requires": ["The Punisher - Part 3"]},
+        {"name": "The Punisher - Part 5", "level": 20, "requires": ["The Punisher - Part 4"]},
+        {"name": "The Punisher - Part 6", "level": 21, "requires": ["The Punisher - Part 5"]},
+        {"name": "Polikhim Hobo", "level": 10, "requires": ["Chemical - Part 1"]},
+        {"name": "Big Customer", "level": 11, "requires": ["Chemical - Part 3"], "exclusive_with": ["Chemical - Part 4", "Out of Curiosity"]}, #<<====== multi choice
+        {"name": "Easy Job - Part 1", "level": 18, "requires": ["The Punisher - Part 2"]},
+        {"name": "Easy Job - Part 2", "level": 18, "requires": ["Easy Job - Part 1"]},
+        {"name": "Reconnaissance", "level": 27, "requires": ["Easy Job - Part 2"]},
+        {"name": "Grenadier", "level": 20},
+        {"name": "Regulated Materials", "level": 25, "requires": ["Polikhim Hobo"]},
+        {"name": "Anesthesia", "level": 21, "requires": ["Shaking Up the Teller"]},
+        {"name": "Perfect Mediator", "level": 35, "requires": ["Shaking Up the Teller"]},
+        {"name": "Test Drive - Part 1", "level": 30, "requires": ["Grenadier"]},
+        {"name": "Test Drive - Part 2", "level": 30, "requires": ["Test Drive - Part 1"]},
+        {"name": "Test Drive - Part 3", "level": 30, "requires": ["Test Drive - Part 2"]},
+        {"name": "Test Drive - Part 4", "level": 40, "requires": ["Test Drive - Part 3"]},
+        {"name": "Test Drive - Part 5", "level": 40, "requires": ["Test Drive - Part 4"]},
+        {"name": "Test Drive - Part 6", "level": 40, "requires": ["Test Drive - Part 5"]},
+        {"name": "Intimidator", "level": 45, "requires": ["The Punisher - Part 6"]},
     ],
     "Therapist": [
-        "First in Line",
-        "Shortage",
-        "Sanitary Standards - Part 1",
-        "Sanitary Standards - Part 2",
-        "Operation Aquarius - Part 1",
-        "Operation Aquarius - Part 2",
-        "Painkiller",
-        "Pharmacist",
-        "Supply Plans",
-        "General Wares",
-        "Car Repair",
-        "Health Care Privacy - Part 1",
-        "Health Care Privacy - Part 2",
-        "Health Care Privacy - Part 3",
-        "Health Care Privacy - Part 4",
-        "Health Care Privacy - Part 5",
-        "Health Care Privacy - Part 6",
-        "Postman Pat - Part 2",
-        "Out of Curiosity",
-        "Athlete",
-        "Decontamination Service",
-        "Private Clinic",
-        "An Apple a Day Keeps the Doctor Away",
-        "Colleagues - Part 1",
-        "Colleagues - Part 2",
-        "Colleagues - Part 3",
-        "Disease History",
-        "Crisis",
-        "Seaside Vacation",
-        "Lost Contact",
-        "Drug Trafficking",
-        "All Is Revealed",
-        "A Healthy Alternative",
-        "Shipment Tracking",
-        "Closer to the People",
-        "Abandoned Cargo"
+        {"name": "First in Line", "level": 1},
+        {"name": "Shortage", "level": 1, "requires": ["First in Line"]},
+        {"name": "Sanitary Standards - Part 1", "level": 4, "requires": ["Shortage"]},
+        {"name": "Sanitary Standards - Part 2", "level": 8, "requires": ["Sanitary Standards - Part 1"]},
+        {"name": "Operation Aquarius - Part 1", "level": 6, "requires": ["Shortage"]},
+        {"name": "Operation Aquarius - Part 2", "level": 6, "requires": ["Operation Aquarius - Part 1"]},
+        {"name": "Painkiller", "level": 8, "requires": ["Sanitary Standards - Part 2"]},
+        {"name": "Pharmacist", "level": 10, "requires": ["Painkiller"]},
+        {"name": "Supply Plans", "level": 13, "requires": ["Pharmacist"], "exclusive_with": ["Kind of Sabotage"]},
+        {"name": "General Wares", "level": 10, "requires": ["Pharmacist"]},
+        {"name": "Car Repair", "level": 10, "requires": ["Pharmacist"]},
+        {"name": "Health Care Privacy - Part 1", "level": 20, "requires": ["Pharmacist"]},
+        {"name": "Health Care Privacy - Part 2", "level": 20, "requires": ["Health Care Privacy - Part 1"]},
+        {"name": "Health Care Privacy - Part 3", "level": 20, "requires": ["Health Care Privacy - Part 2"]},
+        {"name": "Health Care Privacy - Part 4", "level": 20, "requires": ["Health Care Privacy - Part 3"]},
+        {"name": "Health Care Privacy - Part 5", "level": 20, "requires": ["Health Care Privacy - Part 4"]},
+        {"name": "Health Care Privacy - Part 6", "level": 20, "requires": ["Health Care Privacy - Part 5"]},
+        {"name": "Postman Pat - Part 2", "level": 10, "requires": ["Postman Pat - Part 1"]},
+        {"name": "Out of Curiosity", "level": 11, "requires": ["Chemical - Part 3"], "exclusive_with": ["Big Customer", "Chemical - Part 4"]},
+        {"name": "All Is Revealed", "level": 12, "requires": ["Capacity Check"]},
+        {"name": "Disease History", "level": 15, "requires": ["Pharmacist"]},
+        {"name": "A Healthy Alternative", "level": 15, "requires": ["Overpopulation"], "exclusive_with": ["One Less Loose End"]},
+        {"name": "Seaside Vacation", "level": 17, "requires": ["Pharmacist"]},
+        {"name": "Abandoned Cargo", "level": 17, "requires": ["Seaside Vacation"]},
+        {"name": "Shipment Tracking", "level": 17, "requires": ["Abandoned Cargo"]},
+        {"name": "Closer to the People", "level": 17, "requires": ["Shipment Tracking"]},
+        {"name": "Decontamination Service", "level": 20, "requires": ["Health Care Privacy - Part 5", "Private Clinic"]},
+        {"name": "An Apple a Day Keeps the Doctor Away", "level": 10, "requires": ["Health Care Privacy - Part 4"], "exclusive_with": []},
+        {"name": "Colleagues - Part 1", "level": 21, "requires": ["General Wares"]},
+        {"name": "Colleagues - Part 2", "level": 21, "requires": ["Colleagues - Part 1"]},
+        {"name": "Colleagues - Part 3", "level": 21, "requires": ["Colleagues - Part 2", "Rigged_Game", "Chemistry Closet"], "exclusive_with": ["The_Huntsman_Path_-_Sadist"]},
+        {"name": "Lost Contact", "level": 26, "requires": ["Health Care Privacy - Part 2"]},
+        {"name": "Drug Trafficking", "level": 26, "requires": ["Lost Contact"]},
+        {"name": "Athlete", "level": 30, "requires": ["Health Care Privacy - Part 4"], "exclusive_with": []},
+        {"name": "Private Clinic", "level": 35, "requires": ["Health Care Privacy - Part 4"]},
+        {"name": "Crisis", "level": 48, "requires": ["Athlete"]},
     ],
     "Skier": [
-        "Burning Rubber",
-        "Supplier",
-        "The Extortionist",
-        "Stirrup",
-        "What’s on the Flash Drive?",
-        "Golden Swag",
-        "Chemical - Part 1",
-        "Chemical - Part 2",
-        "Chemical - Part 3",
-        "Chemical - Part 4",
-        "Loyalty Buyout",
-        "Friend From the West - Part 1",
-        "Friend From the West - Part 2",
-        "Vitamins - Part 1",
-        "Vitamins - Part 2",
-        "Lend-Lease - Part 1",
-        "Informed Means Armed",
-        "Chumming",
-        "Kind of Sabotage",
-        "Setup",
-        "Flint",
-        "Rigged Game",
-        "Safe Corridor",
-        "Long Road",
-        "Missing Cargo",
-        "The Walls Have Eyes",
-        "Exit Here",
-        "Private Club"
+        {"name": "Burning Rubber", "level": 1},
+        {"name": "Supplier", "level": 5, "requires": ["Burning Rubber"]},
+        {"name": "The Extortionist", "level": 7, "requires": ["Supplier"]},
+        {"name": "Stirrup", "level": 8, "requires": ["Supplier"]},
+        {"name": "What’s on the Flash Drive?", "level": 8, "requires": ["The Extortionist"]},
+        {"name": "Golden Swag", "level": 8, "requires": ["What’s on the Flash Drive?"]},
+        {"name": "Friend From the West - Part 1", "level": 9, "requires": ["Supplier"]},
+        {"name": "Friend From the West - Part 2", "level": 9, "requires": ["Friend From the West - Part 1"]},
+        {"name": "Chemical - Part 1", "level": 10, "requires": ["Golden Swag"]},
+        {"name": "Chemical - Part 2", "level": 10, "requires": ["Chemical - Part 1"]},
+        {"name": "Chemical - Part 3", "level": 11, "requires": ["Chemical - Part 2"]},
+        {"name": "Chemical - Part 4", "level": 11, "requires": ["Chemical - Part 3"], "exclusive_with": ["Big Customer", "Out of Curiosity"]},
+        {"name": "Kind of Sabotage", "level": 10, "requires": ["Pharmacist"], "exclusive_with": ["Supply Plans"]},
+        {"name": "Exit Here", "level": 12, "requires": ["Scout"]},
+        {"name": "The Walls Have Eyes", "level": 12, "requires": ["Exit Here"]},
+        {"name": "Safe Corridor", "level": 15, "requires_any": ["Big Customer", "Chemical - Part 4", "Out of Curiosity"]},
+        {"name": "Setup", "level": 18, "requires": ["Friend From the West - Part 2"]},
+        {"name": "Long Road", "level": 20, "requires": ["Friend From the West - Part 2"]},
+        {"name": "Rigged Game", "level": 21, "requires": ["Anesthesia"]},
+        {"name": "Vitamins - Part 1", "level": 22, "requires": ["Chemical - Part 3"]},
+        {"name": "Vitamins - Part 2", "level": 22, "requires": ["Vitamins - Part 1"]},
+        {"name": "Informed Means Armed", "level": 24, "requires": ["Setup"]},
+        {"name": "Chumming", "level": 24, "requires": ["Informed Means Armed"]},
+        {"name": "Private Club", "level": 24, "requires": ["Chumming"]},
+        {"name": "Lend-Lease - Part 1", "level": 25, "requires": ["Friend From the West - Part 2"]},
+        {"name": "Missing Cargo", "level": 30, "requires": ["Long Road"]},
+        {"name": "Flint", "level": 35, "requires": ["Chumming"]},
     ],
     "Peacekeeper": [
-        "Fishing Gear",
-        "Tigr Safari",
-        "Scrap Metal",
-        "Eagle Eye",
-        "Humanitarian Supplies",
-        "The Cult - Part 1",
-        "The Cult - Part 2",
-        "Spa Tour - Part 1",
-        "Spa Tour - Part 2",
-        "Spa Tour - Part 3",
-        "Spa Tour - Part 4",
-        "Spa Tour - Part 5",
-        "Spa Tour - Part 6",
-        "Spa Tour - Part 7",
-        "Cargo X - Part 1",
-        "Cargo X - Part 2",
-        "Cargo X - Part 3",
-        "Wet Job - Part 1",
-        "Wet Job - Part 2",
-        "Wet Job - Part 3",
-        "Wet Job - Part 4",
-        "Wet Job - Part 5",
-        "Wet Job - Part 6",
-        "The Guide",
-        "Peacekeeping Mission",
-        "Lend-Lease - Part 2",
-        "Samples",
-        "TerraGroup Employee",
-        "Revision - Reserve",
-        "Revision - Lighthouse",
-        "Classified Technologies",
-        "Cargo X - Part 4",
-        "Insomnia",
-        "Overpopulation",
-        "One Less Loose End"
+        {"name": "Fishing Gear", "level": 10, "requires": ["Friend From the West - Part 2"]},
+        {"name": "Tigr Safari", "level": 10, "requires": ["Fishing Gear"]},
+        {"name": "Scrap Metal", "level": 10, "requires": ["Tigr Safari"]},
+        {"name": "Eagle Eye", "level": 11, "requires": ["Scrap Metal"]},
+        {"name": "Humanitarian Supplies", "level": 11, "requires": ["Eagle Eye"]},
+        {"name": "The Cult - Part 1", "level": 12, "requires": ["Humanitarian Supplies"]},
+        {"name": "The Cult - Part 2", "level": 12, "requires": ["The Cult - Part 1"]},
+        {"name": "Spa Tour - Part 1", "level": 12, "requires": ["Humanitarian Supplies"]},
+        {"name": "Spa Tour - Part 2", "level": 12, "requires": ["Spa Tour - Part 1"]},
+        {"name": "Spa Tour - Part 3", "level": 12, "requires": ["Spa Tour - Part 2"]},
+        {"name": "Spa Tour - Part 4", "level": 12, "requires": ["Spa Tour - Part 3"]},
+        {"name": "Spa Tour - Part 5", "level": 12, "requires": ["Spa Tour - Part 4"]},
+        {"name": "Spa Tour - Part 6", "level": 12, "requires": ["Spa Tour - Part 5"]},
+        {"name": "Spa Tour - Part 7", "level": 12, "requires": ["Spa Tour - Part 6"]},
+        {"name": "Overpopulation", "level": 15, "requires": ["Spa Tour - Part 1"]},
+        {"name": "Cargo X - Part 1", "level": 12, "requires": ["Spa Tour - Part 7"]},
+        {"name": "Cargo X - Part 2", "level": 12, "requires": ["Cargo X - Part 1"]},
+        {"name": "Cargo X - Part 3", "level": 12, "requires": ["Cargo X - Part 2"]},
+        {"name": "Cargo X - Part 4", "level": 12, "requires": ["Cargo X - Part 3"]},
+        {"name": "Insomnia", "level": 12, "requires": ["Cargo X - Part 4"]},
+        {"name": "Wet Job - Part 1", "level": 14, "requires": ["Spa Tour - Part 7"]},
+        {"name": "Wet Job - Part 2", "level": 14, "requires": ["Wet Job - Part 1"]},
+        {"name": "Wet Job - Part 3", "level": 14, "requires": ["Wet Job - Part 2"]},
+        {"name": "Wet Job - Part 4", "level": 14, "requires": ["Wet Job - Part 3"]},
+        {"name": "Wet Job - Part 5", "level": 14, "requires": ["Wet Job - Part 4"]},
+        {"name": "Wet Job - Part 6", "level": 14, "requires": ["Wet Job - Part 5"]},
+        {"name": "Revision - Reserve", "level": 14, "requires": ["Humanitarian Supplies"]},
+        {"name": "Revision - Lighthouse", "level": 14, "requires": ["Revision - Reserve"]},
+        {"name": "Classified Technologies", "level": 14, "requires": ["Revision - Reserve"]},
+        {"name": "One Less Loose End", "level": 15, "requires": ["Overpopulation"], "exclusive_with": ["A Healthy Alternative"]},       
+        {"name": "Samples", "level": 21, "requires": ["Anesthesia", "Fishing Gear"]},
+        {"name": "TerraGroup Employee", "level": 23, "requires": ["Samples"], "requires_any": ["The Huntsman Path - Sadist", "Colleagues - Part 3"]},
+        {"name": "Lend-Lease - Part 2", "level": 30, "requires": ["Lend-Lease - Part 1"]},
+        {"name": "Peacekeeping Mission", "level": 30, "requires": ["Lend-Lease - Part 2"]},        
+        {"name": "The Guide", "level": 40, "requires": ["Wet Job - Part 6"]},
     ],
     "Mechanic": [
-        "Saving the Mole",
-        "Gunsmith - Part 1",
-        "Gunsmith - Part 2",
-        "Gunsmith - Part 3",
-        "Gunsmith - Part 4",
-        "Gunsmith - Part 5",
-        "Gunsmith - Part 6",
-        "Gunsmith - Part 7",
-        "Gunsmith - Part 8",
-        "Gunsmith - Part 9",
-        "Gunsmith - Part 10",
-        "Gunsmith - Part 11",
-        "Gunsmith - Part 12",
-        "Gunsmith - Part 13",
-        "Gunsmith - Part 14",
-        "Gunsmith - Part 15",
-        "Gunsmith - Part 16",
-        "Gunsmith - Part 17",
-        "Gunsmith - Part 18",
-        "Gunsmith - Part 19",
-        "Gunsmith - Part 20",
-        "Gunsmith - Part 21",
-        "Gunsmith - Part 22",
-        "Farming - Part 1",
-        "Farming - Part 2",
-        "Farming - Part 3",
-        "Farming - Part 4",
-        "Signal - Part 1",
-        "Signal - Part 2",
-        "Signal - Part 3",
-        "Signal - Part 4",
-        "Bad Habit",
-        "Scout",
-        "Insider",
-        "Import",
-        "Fertilizers",
-        "Psycho Sniper",
-        "A Shooter Born in Heaven",
-        "Introduction",
-        "Chemistry Closet",
-        "Surplus Goods",
-        "Back Door",
-        "Corporate Secrets",
-        "Energy Crisis",
-        "Broadcast - Part 1",
-        "Capacity Check",
-        "Black Swan",
-        "Forklift Certified",
-        "Passion for Ergonomics"
+        {"name": "Saving the Mole", "level": 1},
+        {"name": "Introduction", "level": 2, "requires": ["Saving the Mole"]},
+        {"name": "Gunsmith - Part 1", "level": 2, "requires": ["Saving The Mole"]},
+        {"name": "Gunsmith - Part 2", "level": 5, "requires": ["Gunsmith - Part 1"]},
+        {"name": "Gunsmith - Part 3", "level": 7, "requires": ["Gunsmith - Part 1"]},
+        {"name": "Gunsmith - Part 4", "level": 9, "requires": ["Gunsmith - Part 2", "Gunsmith - Part 3"]},
+        {"name": "Gunsmith - Part 5", "level": 10, "requires": ["Gunsmith - Part 4"]},
+        {"name": "Gunsmith - Part 6", "level": 14, "requires": ["Gunsmith - Part 5"]},
+        {"name": "Gunsmith - Part 7", "level": 15, "requires": ["Gunsmith - Part 6"]},
+        {"name": "Gunsmith - Part 8", "level": 17, "requires": ["Gunsmith - Part 7"]},
+        {"name": "Gunsmith - Part 9", "level": 19, "requires": ["Gunsmith - Part 8"]},
+        {"name": "Gunsmith - Part 10", "level": 20, "requires": ["Gunsmith - Part 9"]},
+        {"name": "Gunsmith - Part 11", "level": 22, "requires": ["Gunsmith - Part 10"]},
+        {"name": "Gunsmith - Part 12", "level": 23, "requires": ["Gunsmith - Part 11"]},
+        {"name": "Gunsmith - Part 13", "level": 25, "requires": ["Gunsmith - Part 12"]},
+        {"name": "Gunsmith - Part 14", "level": 27, "requires": ["Gunsmith - Part 13"]},
+        {"name": "Gunsmith - Part 15", "level": 29, "requires": ["Gunsmith - Part 14"]},
+        {"name": "Gunsmith - Part 16", "level": 30, "requires": ["Gunsmith - Part 15"]},
+        {"name": "Gunsmith - Part 17", "level": 31, "requires": ["Gunsmith - Part 16"]},
+        {"name": "Gunsmith - Part 18", "level": 33, "requires": ["Gunsmith - Part 17"]},
+        {"name": "Gunsmith - Part 19", "level": 36, "requires": ["Gunsmith - Part 18"]},
+        {"name": "Gunsmith - Part 20", "level": 37, "requires": ["Gunsmith - Part 19"]},
+        {"name": "Gunsmith - Part 21", "level": 38, "requires": ["Gunsmith - Part 20"]},
+        {"name": "Gunsmith - Part 22", "level": 39, "requires": ["Gunsmith - Part 21"]},
+        {"name": "Insider", "level": 12, "requires": ["Signal - Part 1", "Gunsmith - Part 3"]},
+        {"name": "Farming - Part 1", "level": 12, "requires": ["Gunsmith - Part 1"]},
+        {"name": "Farming - Part 2", "level": 12, "requires": ["Farming - Part 1"]},
+        {"name": "Farming - Part 3", "level": 14, "requires": ["Farming - Part 2"]},
+        {"name": "Farming - Part 4", "level": 14, "requires": ["Farming - Part 3"]},
+        {"name": "Bad Habit", "level": 12, "requires": ["Farming - Part 2"]},
+        {"name": "Broadcast - Part 1", "level": 12, "requires": ["Farming - Part 2"]},
+        {"name": "Passion for Ergonomics", "level": 12, "requires": ["Farming - Part 2"]},
+        {"name": "A Shooter Born in Heaven", "level": 14, "requires": ["Farming - Part 3"]},
+        {"name": "Signal - Part 1", "level": 12, "requires": ["Gunsmith - Part 2"]},
+        {"name": "Signal - Part 2", "level": 12, "requires": ["Signal - Part 1"]},
+        {"name": "Signal - Part 3", "level": 15, "requires": ["Signal - Part 2"]},
+        {"name": "Signal - Part 4", "level": 15, "requires": ["Signal - Part 3"]},
+        {"name": "Scout", "level": 12, "requires": ["Signal - Part 2"]},
+        {"name": "Back Door", "level": 14, "requires": ["Scout"]},
+        {"name": "Surplus Goods", "level": 14, "requires": ["Back Door"]},
+        {"name": "Black Swan", "level": 12, "requires": ["Scout"]},
+        {"name": "Forklift Certified", "level": 12, "requires": ["Black Swan"]},
+        {"name": "Capacity Check", "level": 12, "requires": ["Farming - Part 1", "Forklift Certified"]},
+        {"name": "Corporate Secrets", "level": 17, "requires": ["Farming - Part 3"]},
+        {"name": "Chemistry Closet", "level": 22, "requires": ["Colleagues - Part 1", "Anesthesia"]},
+        {"name": "Energy Crisis", "level": 25, "requires": ["Farming - Part 3"]},
+        {"name": "Fertilizers", "level": 30, "requires": ["Farming - Part 4"]},
+        {"name": "Import", "level": 35, "requires": ["Farming - Part 4"]},
+        {"name": "Psycho Sniper", "level": 35, "requires": ["Wet Job - Part 6"]},
     ],
     "Ragman": [
-        "Only Business",
-        "Make ULTRA Great Again",
-        "Big Sale",
-        "The Blood of War - Part 1",
-        "The Blood of War - Part 2",
-        "The Blood of War - Part 3",
-        "Dressed to Kill",
-        "Gratitude",
-        "Sales Night",
-        "Hot Delivery",
-        "Database - Part 1",
-        "Database - Part 2",
-        "Minibus",
-        "Sew it Good - Part 1",
-        "Sew it Good - Part 2",
-        "Sew it Good - Part 3",
-        "Sew it Good - Part 4",
-        "The Key to Success",
-        "Living High is Not a Crime - Part 1",
-        "Living High is Not a Crime - Part 2",
-        "Charisma Brings Success",
-        "No Fuss Needed",
-        "Supervisor",
-        "Scavenger",
-        "Inventory Check",
-        "A Fuel Matter",
-        "Break the Deal"
+        {"name": "Only Business", "level": 15},
+        {"name": "Make ULTRA Great Again", "level": 15, "requires": ["Only Business"]},
+        {"name": "Big Sale", "level": 15, "requires": ["Only Business"]},
+        {"name": "Break the Deal", "level": 15, "requires": ["Make ULTRA Great Again"]},
+        {"name": "Database - Part 1", "level": 15, "requires": ["Big Sale"]},
+        {"name": "Database - Part 2", "level": 15, "requires": ["Database - Part 1"]},
+        {"name": "The Blood of War - Part 1", "level": 15, "requires": ["Big Sale"]},
+        {"name": "The Blood of War - Part 2", "level": 23, "requires": ["The Blood of War - Part 1", "Sew it Good - Part 1"]},
+        {"name": "The Blood of War - Part 3", "level": 30, "requires": ["The Blood of War - Part 2"]},
+        {"name": "A Fuel Matter", "level": 15, "requires": ["The Blood of War - Part 1"]},
+        {"name": "Inventory Check", "level": 15, "requires": ["A Fuel Matter"]},
+        {"name": "Dressed to Kill", "level": 15, "requires": ["The Blood of War - Part 1"]},
+        {"name": "Gratitude", "level": 15, "requires": ["Database - Part 2", "Dressed to Kill"]},
+        {"name": "Minibus", "level": 24, "requires": ["Database - Part 2"]},
+        {"name": "Sew it Good - Part 1", "level": 25, "requires": ["Database - Part 2"]},
+        {"name": "Sew it Good - Part 2", "level": 25, "requires": ["Sew it Good - Part 1"]},
+        {"name": "Sew it Good - Part 3", "level": 25, "requires": ["Sew it Good - Part 2"]},
+        {"name": "Sew it Good - Part 4", "level": 25, "requires": ["Sew it Good - Part 3"]},
+        {"name": "The Key to Success", "level": 26, "requires": ["Sew it Good - Part 2"]},
+        {"name": "No Fuss Needed", "level": 26, "requires": ["The Key to Success"]},
+        {"name": "Charisma Brings Success", "level": 25, "requires": ["The Blood of War - Part 1", "Sew it Good - Part 4"]},
+        {"name": "Living High is Not a Crime - Part 1", "level": 27, "requires": ["The Blood of War - Part 1", "Sew it Good - Part 3"]},
+        {"name": "Living High is Not a Crime - Part 2", "level": 27, "requires": ["Living High is Not a Crime - Part 1"]},
+        {"name": "Hot Delivery", "level": 29, "requires": ["Gratitude"]},
+        {"name": "Scavenger", "level": 29, "requires": ["Hot Delivery"]},
+        {"name": "Sales Night", "level": 30, "requires": ["Gratitude"]},
+        {"name": "Supervisor", "level": 40, "requires": ["Sales Night", "The Key to Success"]},
     ],
     "Jaeger": [
-        "Acquaintance",
-        "The Survivalist Path - Unprotected but Dangerous",
-        "The Survivalist Path - Thrifty",
-        "The Survivalist Path - Zhivchik",
-        "The Survivalist Path - Wounded Beast",
-        "The Survivalist Path - Tough Guy",
-        "The Survivalist Path - Junkie",
-        "The Survivalist Path - Eagle-Owl",
-        "The Survivalist Path - Combat Medic",
-        "The Huntsman Path - Secured Perimeter",
-        "The Huntsman Path - Trophy",
-        "The Huntsman Path - Forest Cleaning",
-        "The Huntsman Path - Controller",
-        "The Huntsman Path - Sellout",
-        "The Huntsman Path - Woods Keeper",
-        "The Huntsman Path - Justice",
-        "The Huntsman Path - Evil Watchman",
-        "The Huntsman Path - Eraser - Part 1",
-        "The Huntsman Path - Eraser - Part 2",
-        "The Huntsman Path - Sadist",
-        "Ambulance",
-        "Shady Business",
-        "Nostalgia",
-        "Fishing Place",
-        "Courtesy Visit",
-        "Hunting Trip",
-        "Reserve",
-        "The Tarkov Shooter - Part 1",
-        "The Tarkov Shooter - Part 2",
-        "The Tarkov Shooter - Part 3",
-        "The Tarkov Shooter - Part 4",
-        "The Tarkov Shooter - Part 5",
-        "The Tarkov Shooter - Part 6",
-        "The Tarkov Shooter - Part 7",
-        "The Tarkov Shooter - Part 8",
-        "Pest Control",
-        "The Huntsman Path - Factory Chief",
-        "The Hermit",
-        "The Huntsman Path - Outcasts",
-        "Stray Dogs",
-        "The Delicious Sausage",
-        "Every Hunter Knows This",
-        "Rough Tarkov",
-        "Dragnet",
-        "Claustrophobia",
-        "Work Smarter",
-        "Rite of Passage"
+        {"name": "Acquaintance", "level": 2, "requires": ["Introduction"]}, 
+        {"name": "Rough Tarkov", "level": 2, "requires": ["Acquaintance"]},
+        {"name": "Every Hunter Knows This", "level": 2, "requires": ["Rough Tarkov"]},
+        {"name": "Work Smarter", "level": 2, "requires": ["Acquaintance"]},
+        {"name": "Rite of Passage", "level": 2, "requires": ["Work Smarter"]},
+        {"name": "The Survivalist Path - Unprotected but Dangerous", "level": 2, "requires": ["Acquaintance"]},
+        {"name": "The Survivalist Path - Thrifty", "level": 2, "requires": ["The Survivalist Path - Unprotected but Dangerous"]},
+        {"name": "The Survivalist Path - Zhivchik", "level": 2, "requires": ["The Survivalist Path - Thrifty"]},
+        {"name": "The Survivalist Path - Wounded Beast", "level": 2, "requires": ["The Survivalist Path - Zhivchik"]},
+        {"name": "The Survivalist Path - Tough Guy", "level": 2, "requires": ["The Survivalist Path - Wounded Beast"]},
+        {"name": "The Survivalist Path - Eagle-Owl", "level": 2, "requires": ["The Survivalist Path - Tough Guy"]},
+        {"name": "The Survivalist Path - Combat Medic", "level": 2, "requires": ["The Survivalist Path - Eagle-Owl"]},
+        {"name": "The Survivalist Path - Junkie", "level": 2, "requires": ["The Survivalist Path - Combat Medic"]},
+        {"name": "The Tarkov Shooter - Part 1", "level": 2, "requires": ["Acquaintance"]},
+        {"name": "The Tarkov Shooter - Part 2", "level": 2, "requires": ["The Tarkov Shooter - Part 1"]},
+        {"name": "The Tarkov Shooter - Part 3", "level": 2, "requires": ["The Tarkov Shooter - Part 2"]},
+        {"name": "The Tarkov Shooter - Part 4", "level": 2, "requires": ["The Tarkov Shooter - Part 3"]},
+        {"name": "The Tarkov Shooter - Part 5", "level": 2, "requires": ["The Tarkov Shooter - Part 4"]},
+        {"name": "The Tarkov Shooter - Part 6", "level": 2, "requires": ["The Tarkov Shooter - Part 5"]},
+        {"name": "The Tarkov Shooter - Part 7", "level": 2, "requires": ["The Tarkov Shooter - Part 6"]},
+        {"name": "The Tarkov Shooter - Part 8", "level": 2, "requires": ["The Tarkov Shooter - Part 7"]},
+        {"name": "The Huntsman Path - Secured Perimeter", "level": 2, "requires": ["The Survivalist Path - Tough Guy", "The Tarkov Shooter - Part 3"]},
+        {"name": "The Huntsman Path - Trophy", "level": 2, "requires": ["The Huntsman Path - Secured Perimeter"]},
+        {"name": "The Huntsman Path - Justice", "level": 2, "requires": ["The Huntsman Path - Secured Perimeter"]},
+        {"name": "The Huntsman Path - Woods Keeper", "level": 2, "requires": ["The Huntsman Path - Secured Perimeter"]},
+        {"name": "The Huntsman Path - Sellout", "level": 2, "requires": ["The Huntsman Path - Secured Perimeter"]},
+        {"name": "The Huntsman Path - Forest Cleaning", "level": 2, "requires": ["The Huntsman Path - Secured Perimeter"]},
+        {"name": "The Huntsman Path - Controller", "level": 2, "requires": ["The Huntsman Path - Forest Cleaning"]},
+        {"name": "The Huntsman Path - Evil Watchman", "level": 2, "requires": ["The Huntsman Path - Forest Cleaning"]},
+        {"name": "The Huntsman Path - Outcasts", "level": 2, "requires": ["The Huntsman Path - Forest Cleaning"]},        
+        {"name": "The Huntsman Path - Eraser - Part 1", "level": 2, "requires": ["Pest Control"]},
+        {"name": "The Huntsman Path - Eraser - Part 2", "level": 2, "requires": ["The Huntsman Path - Eraser - Part 1", "The Huntsman Path - Secured Perimeter"]},
+        {"name": "Claustrophobia", "level": 2, "requires": ["The Huntsman Path - Forest Cleaning"]},
+        {"name": "The Huntsman Path - Factory Chief", "level": 12, "requires": ["Scout", "The Huntsman Path - Forest Cleaning"]},
+        {"name": "The Huntsman Path - Sadist", "level": 21, "requires": ["Colleagues Part 2", "Rigged Game", "Chemistry Closet"], "exclusive_with": ["Colleagues - Part 3"]},
+        {"name": "The Delicious Sausage", "level": 5, "requires": ["The Survivalist Path - Thrifty"]},
+        {"name": "Reserve", "level": 20, "requires": ["The Delicious Sausage"]},
+        {"name": "Pest Control", "level": 10, "requires": ["Reserve"]},
+        {"name": "Dragnet", "level": 15, "requires_any": ["One Less Loose End", "A Healthy Alternative"]},
+        {"name": "The Hermit", "level": 20, "requires": ["The Survivalist Path - Tough Guy"]},
+        {"name": "Shady Business", "level": 20, "requires": ["Acquaintance", "What's on the Flash Drive"]},
+        {"name": "Ambulance", "level": 25, "requires": ["Shady Business"]},
+        {"name": "Courtesy Visit", "level": 20, "requires": ["The Survivalist Path - Tough Guy"]},
+        {"name": "Nostalgia", "level": 28, "requires": ["Courtesy Visit"]},
+        {"name": "Fishing Place", "level": 25, "requires": ["Nostalgia"]},
+        {"name": "Hunting Trip", "level": 33, "requires": ["The Huntsman Path - Woods Keeper"]},
+        {"name": "Stray Dogs", "level": 35, "requires": ["The Huntsman Path - Sellout", "The Huntsman Path - Trophy", "The Huntsman Path - Woods Keeper"]},
     ],
-    "Fence": ["Collector"],
+    "Fence": [
+        {"name": "Collector", "level": 48, "requires_all_other_quests": True}
+    ],
 }
 
 prapor_quest_links = {
@@ -1734,47 +1796,160 @@ def load_checklist_vars():
 
     add_footer(checklist_screen)
 
+# Global dict for quest row widgets to keep persistent
+quest_row_widgets = {}
+quest_list_frame = None
+title_label = None
+nav_frame = None
+show_completed_quests = None
+quest_page_index = 0
+page_indicator_label = None
+
+# Constants
+QUESTS_PER_PAGE = 10  # Keep this as needed
+
 def load_quest_checklist_vars(trader=None):
     global quest_page_index, page_indicator_label
+    global quest_list_frame, title_label, nav_frame
+    global show_completed_quests  # Tracks checkbox state
+
+    # Clear the screen first
+    for widget in quest_checklist_screen.winfo_children():
+        widget.destroy()
+    quest_checklist_screen.update()
+    quest_checklist_screen.update_idletasks()
 
     current_mode = selected_game_mode.get()
     if not current_mode:
         return
 
-    # === DEBUG PRINTS ===
-    #print(f"[DEBUG] Loading quest checklist for mode: {current_mode}")
     saved_state = data.get("quest_checklist", {}).get(current_mode, {})
-    #print(f"[DEBUG] Saved quests checked: {[k for k,v in saved_state.items() if v]}")
-    # ====================
 
-    # Clear existing UI
-    for widget in quest_checklist_screen.winfo_children():
-        widget.destroy()
+    # Title label
+    title_label = ctk.CTkLabel(quest_checklist_screen, text="", font=("Arial", 24))
+    if trader:
+        title_label.configure(text=f"{trader} Quests - Mode: {current_mode}")
+    else:
+        title_label.configure(text=f"All Quests - Mode: {current_mode}")
+    title_label.pack(pady=(10, 0))
 
-    # --- Back button in top-left corner using .place() like trader screen ---
+    # Scrollable frame with your preferred fixed height
+    quest_list_frame = ctk.CTkScrollableFrame(quest_checklist_screen, height=280)
+    quest_list_frame.pack(fill="x", padx=20, pady=(10, 10))
+
+    # Navigation frame for pagination buttons and label
+    nav_frame = ctk.CTkFrame(quest_checklist_screen, fg_color="transparent")
+    nav_frame.pack(pady=5)
+
+    # Back button
     back_btn = ctk.CTkButton(
-        quest_checklist_screen, text="← Back",
+        quest_checklist_screen,
+        text="← Back",
         command=lambda: switch_and_save(build_trader_selection_screen)
     )
-    back_btn.place(x=10, y=10)  # 10px from top and left
+    back_btn.place(x=10, y=10)
 
-    # Load state (already loaded above for debug)
-    # saved_state = data.get("quest_checklist", {}).get(current_mode, {})
+    # Initialize show_completed_quests if not already
+    if show_completed_quests is None:
+        show_completed_quests = ctk.BooleanVar(value=True)
 
-    # Ensure all quest vars exist
-    all_quests = []
-    for quests in trader_quests.values():
-        all_quests.extend(quests)
-    for quest in all_quests:
-        if quest not in quest_checklist_vars:
-            quest_checklist_vars[quest] = ctk.BooleanVar()
-        quest_checklist_vars[quest].set(saved_state.get(quest, False))
+    # Show Completed checkbox
+    if hasattr(load_quest_checklist_vars, "show_completed_cb") and load_quest_checklist_vars.show_completed_cb.winfo_exists():
+        load_quest_checklist_vars.show_completed_cb.destroy()
 
-    # Determine quests to show
+    load_quest_checklist_vars.show_completed_cb = ctk.CTkCheckBox(
+        quest_checklist_screen,
+        text="Show Completed Quests",
+        variable=show_completed_quests,
+        command=lambda: load_quest_checklist_vars(trader),
+        font=("Arial", 10)
+    )
+    load_quest_checklist_vars.show_completed_cb.place(relx=0, rely=1, x=8, y=-8, anchor="sw")
+
+    # Reset quest_page_index when opening new trader/all quests
+    global quest_page_index
+    quest_page_index = 0
+
+    # Build the quest list UI (this handles pagination internally)
+    refresh_quest_list(trader)
+
+    # Show/hide pagination only on All Quests page
+    if not trader:
+        refresh_pagination(trader)
+
+    update_progress_labels()
+    add_footer(quest_checklist_screen)
+
+def get_filtered_quests(trader):
+    """ Helper to return quests filtered by unlock and show_completed_quests state """
+    current_mode = selected_game_mode.get()
+    saved_state = data.get("quest_checklist", {}).get(current_mode, {})
+
+    # flatten all quests
+    all_quests = [q for qs in trader_quests.values() for q in qs]
+
+    player_level = level_value.get()
+    completed_quests = {q for q, done in saved_state.items() if done}
+
     if trader:
-        quest_items_to_show = trader_quests.get(trader, [])
-        screen_title = f"{trader} Quests - Mode: {current_mode}"
-        trader_links = {
+        raw_quests = trader_quests.get(trader, [])
+    else:
+        raw_quests = all_quests
+
+    filtered = [
+        quest for quest in raw_quests
+        if is_quest_unlocked(quest, completed_quests, player_level, all_quests=trader_quests)
+    ]
+
+    if not show_completed_quests.get():
+        filtered = [q for q in filtered if q["name"] not in completed_quests]
+
+    return filtered
+
+
+def refresh_quest_list(trader=None):
+    global quest_row_widgets, quest_list_frame, quest_page_index
+
+    # Clear previous quest rows
+    for widget in quest_list_frame.winfo_children():
+        widget.destroy()
+    quest_row_widgets = {}
+
+    current_mode = selected_game_mode.get()
+    if not current_mode:
+        return
+
+    saved_state = data.get("quest_checklist", {}).get(current_mode, {})
+    player_level = level_value.get()
+
+    # Determine quests to show & pagination
+    if trader is None:
+        # All quests: flatten all trader quests
+        all_quests = [q for qs in trader_quests.values() for q in qs]
+
+        total_pages = max(1, (len(all_quests) - 1) // QUESTS_PER_PAGE + 1)
+        # Clamp page index
+        quest_page_index = max(0, min(quest_page_index, total_pages - 1))
+
+        start = quest_page_index * QUESTS_PER_PAGE
+        end = start + QUESTS_PER_PAGE
+        quests_to_show = all_quests[start:end]
+
+        links = all_quest_links
+
+    else:
+        # Trader quests: show unlocked quests, filtered by show_completed_quests
+        raw_quests = trader_quests.get(trader, [])
+        completed_quests = {qname for qname, var in quest_checklist_vars.items() if var.get()}
+        quests_to_show = [
+            quest for quest in raw_quests
+            if is_quest_unlocked(quest, completed_quests, player_level, all_quests=trader_quests)
+        ]
+
+        if show_completed_quests and not show_completed_quests.get():
+            quests_to_show = [q for q in quests_to_show if not quest_checklist_vars[q["name"]].get()]
+
+        links = {
             "Prapor": prapor_quest_links,
             "Therapist": therapist_quest_links,
             "Skier": skier_quest_links,
@@ -1784,80 +1959,77 @@ def load_quest_checklist_vars(trader=None):
             "Jaeger": jaeger_quest_links,
             "Fence": fence_quest_links
         }.get(trader, {})
-    else:
-        quest_items_to_show = all_quests
-        screen_title = f"All Quests - Mode: {current_mode}"
-        trader_links = all_quest_links
 
-        # Clamp page index
-        total_pages = (len(quest_items_to_show) - 1) // QUESTS_PER_PAGE + 1
-        quest_page_index = max(0, min(quest_page_index, total_pages - 1))
+    # Create quest rows with checkboxes and info buttons
+    for quest in quests_to_show:
+        qname = quest["name"]
 
-        start = quest_page_index * QUESTS_PER_PAGE
-        end = start + QUESTS_PER_PAGE
-        quest_items_to_show = quest_items_to_show[start:end]
+        row = ctk.CTkFrame(quest_list_frame, fg_color="transparent")
+        row.pack(fill="x", pady=2)
+        quest_row_widgets[qname] = row
 
-    # Title label centered using .pack()
-    label = ctk.CTkLabel(quest_checklist_screen, text=screen_title, font=("Arial", 24))
-    label.pack(pady=(10, 0))  # top padding 10, bottom 0
-
-    # Scrollable quest checklist
-    scrollable_frame = ctk.CTkScrollableFrame(quest_checklist_screen, height=280)
-    scrollable_frame.pack(fill="x", padx=20, pady=(10, 10))
-
-    for quest in quest_items_to_show:
-        var = quest_checklist_vars[quest]
-
-        row_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
-        row_frame.pack(fill="x", pady=2)
+        # Ensure variable exists and set saved state
+        if qname not in quest_checklist_vars:
+            quest_checklist_vars[qname] = ctk.BooleanVar()
+        quest_checklist_vars[qname].set(saved_state.get(qname, False))
 
         cb = ctk.CTkCheckBox(
-            row_frame,
-            text=quest,
-            variable=var,
-            command=lambda q=quest: [update_progress_labels(), save_quest_checklist_state(), save_data()]  # <-- Updated here
+            row,
+            text=qname,
+            variable=quest_checklist_vars[qname],
+            command=lambda q=qname, t=trader: on_quest_toggle(q, t)
         )
         cb.pack(side="left", anchor="w")
 
-        if trader_links and quest in trader_links:
+        if qname in links:
             info_btn = ctk.CTkButton(
-                row_frame,
+                row,
                 text="Info",
                 width=60,
                 height=24,
-                command=lambda url=trader_links[quest]: open_info_link(url)
+                command=lambda url=links[qname]: open_info_link(url)
             )
             info_btn.pack(side="right")
 
-    # Pagination for "All Quests"
-    nav_frame = ctk.CTkFrame(quest_checklist_screen, fg_color="transparent")
-    nav_frame.pack(pady=5)
+def refresh_pagination(trader):
+    """
+    Build pagination controls under the quest list.
+    Only used on the All Quests page (trader=None).
+    """
+    global quest_page_index, nav_frame, page_indicator_label
 
-    if not trader:
-        total_pages = (len(all_quests) - 1) // QUESTS_PER_PAGE + 1
-        current_page = quest_page_index + 1
+    # Clear previous nav widgets
+    for widget in nav_frame.winfo_children():
+        widget.destroy()
 
-        prev_btn = ctk.CTkButton(nav_frame, text="← Prev", command=lambda: change_quest_page(-1))
-        prev_btn.pack(side="left", padx=10)
-        if quest_page_index == 0:
-            prev_btn.configure(state="disabled")
+    # No pagination on trader views
+    if trader is not None:
+        return
 
-        page_indicator_label = ctk.CTkLabel(
-            nav_frame,
-            text=f"Page {current_page} of {total_pages}",
-            font=("Arial", 16)
-        )
-        page_indicator_label.pack(side="left", padx=10)
+    all_quests = [q for qs in trader_quests.values() for q in qs]
+    total_quests = len(all_quests)
+    total_pages = max(1, (total_quests - 1) // QUESTS_PER_PAGE + 1)
+    current_page = quest_page_index + 1
 
-        next_btn = ctk.CTkButton(nav_frame, text="Next →", command=lambda: change_quest_page(1))
-        next_btn.pack(side="left", padx=10)
-        if current_page >= total_pages:
-            next_btn.configure(state="disabled")
+    def change_quest_page(offset):
+        global quest_page_index
+        quest_page_index += offset
+        quest_page_index = max(0, min(quest_page_index, total_pages - 1))
+        refresh_quest_list(None)
+        refresh_pagination(None)
 
-    update_progress_labels()
+    prev_btn = ctk.CTkButton(nav_frame, text="← Prev", command=lambda: change_quest_page(-1))
+    prev_btn.pack(side="left", padx=10)
+    if quest_page_index == 0:
+        prev_btn.configure(state="disabled")
 
-    # Add footer
-    add_footer(quest_checklist_screen)
+    page_indicator_label = ctk.CTkLabel(nav_frame, text=f"Page {current_page} of {total_pages}", font=("Arial", 16))
+    page_indicator_label.pack(side="left", padx=10)
+
+    next_btn = ctk.CTkButton(nav_frame, text="Next →", command=lambda: change_quest_page(1))
+    next_btn.pack(side="left", padx=10)
+    if current_page >= total_pages:
+        next_btn.configure(state="disabled")
 
 # === AUTOSAVE every 30 seconds ===
 def autosave():
